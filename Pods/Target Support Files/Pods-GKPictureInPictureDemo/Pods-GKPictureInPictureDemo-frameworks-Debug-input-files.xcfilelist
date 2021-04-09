@@ -1,0 +1,3 @@
+${PODS_ROOT}/Target Support Files/Pods-GKPictureInPictureDemo/Pods-GKPictureInPictureDemo-frameworks.sh
+${BUILT_PRODUCTS_DIR}/GKMessageTool/GKMessageTool.framework
+${BUILT_PRODUCTS_DIR}/MBProgressHUD/MBProgressHUD.framework

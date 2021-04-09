@@ -1,0 +1,179 @@
+//
+//  GKPipManager.m
+//  GKPictureInPictureDemo
+//
+//  Created by gaokun on 2021/4/8.
+//
+
+#import "GKPipManager.h"
+#import <AVKit/AVKit.h>
+#import "PlayerViewController.h"
+
+@interface GKPipManager()<AVPictureInPictureControllerDelegate>
+
+@property (nonatomic, strong) AVPlayer *player;
+@property (nonatomic, strong) AVPlayerLayer *playerLayer;
+@property (nonatomic, strong) AVPictureInPictureController *pipVC;
+@property (nonatomic, copy) void(^success)(void);
+@property (nonatomic, copy) void(^failure)(NSString *error);
+
+@property (nonatomic, assign) BOOL isHandleRestore;
+
+@end
+
+@implementation GKPipManager
+
++ (instancetype)sharedManager {
+    static GKPipManager *instance = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        instance = [[GKPipManager alloc] init];
+    });
+    return instance;
+}
+
+- (UIWindow *)keyWindow {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return [UIApplication sharedApplication].keyWindow;
+#pragma clang diagnostic pop
+}
+
+- (void)startPipWithUrl:(NSURL *)url time:(float)time stoppedWhenPlayEnd:(BOOL)stoppedWhenPlayEnd success:(void (^)(void))success failure:(void (^)(NSString * _Nonnull))failure {
+    self.success = success;
+    self.failure = failure;
+    
+    if (AVPictureInPictureController.isPictureInPictureSupported) {
+        // 创建不可见的播放视图
+        UIView *playView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 1, 1)];
+        playView.center = self.keyWindow.center;
+        playView.hidden = YES;
+        [self.keyWindow addSubview:playView];
+        
+        // 创建播放器
+        self.player = [AVPlayer playerWithURL:url];
+        [self.player addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionNew context:nil];
+        
+        // 创建播放layer
+        self.playerLayer = [AVPlayerLayer playerLayerWithPlayer:self.player];
+        self.playerLayer.frame = playView.bounds;
+        [playView.layer addSublayer:self.playerLayer];
+        
+        // 播放
+        [self.player seekToTime:CMTimeMake(time, 1) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero];
+        [self.player play];
+        
+        if (stoppedWhenPlayEnd) {
+            // 监听播放结束
+            [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(playEnded:) name:AVPlayerItemDidPlayToEndTimeNotification object:nil];
+        }
+    }else {
+        !self.failure ? : self.failure(@"该系统不支持画中画功能");
+    }
+}
+
+- (void)playEnded:(NSNotification *)notify {
+    NSLog(@"播放结束");
+    [self.player pause];
+    self.player = nil;
+    [self.playerLayer removeFromSuperlayer];
+    self.playerLayer = nil;
+    
+    [self.pipVC stopPictureInPicture];
+    self.pipVC.delegate = nil;
+    self.pipVC = nil;
+}
+
+- (void)startPip {
+    @try {
+        NSError *error = nil;
+        [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback error:&error];
+        [[AVAudioSession sharedInstance] setActive:YES error:&error];
+    } @catch (NSException *exception) {
+        NSLog(@"AVAudioSession发生错误");
+    }
+    
+    self.pipVC = [[AVPictureInPictureController alloc] initWithPlayerLayer:self.playerLayer];
+    self.pipVC.delegate = self;
+    
+    // 延迟一下，否则可能开启失败
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5f * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self.pipVC startPictureInPicture];
+        !self.success ? : self.success();
+    });
+}
+
+- (void)stopPip {
+    [self.player pause];
+    [self.player removeObserver:self forKeyPath:@"status"];
+    self.player = nil;
+    [self.playerLayer removeFromSuperlayer];
+    self.playerLayer = nil;
+    [self.pipVC stopPictureInPicture];
+    self.pipVC.delegate = nil;
+    self.pipVC = nil;
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:AVPlayerItemDidPlayToEndTimeNotification object:nil];
+}
+
+#pragma mark - KVO
+- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary<NSKeyValueChangeKey,id> *)change context:(void *)context {
+    if ([keyPath isEqualToString:@"status"]) {
+        switch (self.player.status) {
+            case AVPlayerStatusReadyToPlay: {
+                [self startPip];
+            }
+                break;
+            case AVPlayerStatusFailed: {
+                !self.failure ? : self.failure(@"播放失败");
+            }
+                break;
+            case AVPlayerStatusUnknown: {
+                !self.failure ? : self.failure(@"未知错误");
+            }
+                break;
+                
+            default:
+                break;
+        }
+    }
+}
+
+#pragma mark - AVPictureInPictureControllerDelegate
+- (void)pictureInPictureControllerWillStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
+    NSLog(@"即将开启");
+}
+
+- (void)pictureInPictureControllerDidStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
+    NSLog(@"成功开启");
+}
+
+- (void)pictureInPictureControllerWillStopPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
+    NSLog(@"即将关闭");
+}
+
+- (void)pictureInPictureControllerDidStopPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
+    NSLog(@"成功关闭");
+    [self stopPip];
+    if (self.isHandleRestore) {
+        self.isHandleRestore = NO;
+        PlayerViewController *playerVC = [[PlayerViewController alloc] init];
+        
+        UIViewController *rootVC = self.keyWindow.rootViewController;
+        if ([rootVC isKindOfClass:[UINavigationController class]]) {
+            [(UINavigationController *)rootVC pushViewController:playerVC animated:YES];
+        }else {
+            [rootVC.navigationController pushViewController:playerVC animated:YES];
+        }
+    }
+}
+
+- (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController failedToStartPictureInPictureWithError:(NSError *)error {
+    NSLog(@"开启失败--%@", error);
+}
+
+- (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController restoreUserInterfaceForPictureInPictureStopWithCompletionHandler:(void (^)(BOOL))completionHandler {
+    NSLog(@"跳转");
+    self.isHandleRestore = YES;
+}
+
+@end

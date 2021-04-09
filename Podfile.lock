@@ -1,0 +1,20 @@
+PODS:
+  - GKMessageTool (1.0.5):
+    - MBProgressHUD
+  - MBProgressHUD (1.2.0)
+
+DEPENDENCIES:
+  - GKMessageTool
+
+SPEC REPOS:
+  trunk:
+    - GKMessageTool
+    - MBProgressHUD
+
+SPEC CHECKSUMS:
+  GKMessageTool: fcf46cca30f62eaebb8fea288c9452f3682645f2
+  MBProgressHUD: 3ee5efcc380f6a79a7cc9b363dd669c5e1ae7406
+
+PODFILE CHECKSUM: 3ce7105ed2d457d6f46b98d50794faa0a3bbc4ca
+
+COCOAPODS: 1.10.1
